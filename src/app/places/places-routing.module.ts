@@ -20,7 +20,7 @@ const routes: Routes = [
                         loadChildren: './discover/place-detail/place-detail.module#PlaceDetailPageModule'
                     }
                 ]
-                
+
             },
             {
                 path: 'offers',
