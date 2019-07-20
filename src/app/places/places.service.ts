@@ -1,59 +1,84 @@
 import { Injectable } from '@angular/core';
-import { BehaviorSubject } from 'rxjs';
-import { take, map, tap, delay } from 'rxjs/operators';
+import { BehaviorSubject, of } from 'rxjs';
+import { take, map, tap, delay, switchMap } from 'rxjs/operators';
 import { Place } from './place.model';
 import { AuthService } from '../auth/auth.service';
+import { HttpClient } from '@angular/common/http';
+
+interface PlaceData {
+  availableFrom: string;
+  availableTo: string;
+  description: string;
+  imageUrl: string;
+  price: number;
+  title: string;
+  userId: string;
+}
 
 @Injectable({
   providedIn: 'root'
 })
 export class PlacesService {
-  private _places = new BehaviorSubject<Place[]>([
-    new Place(
-      'p1',
-      'Manhattan Mansion',
-      'In the heart of New York City',
-      'https://imgs.6sqft.com/wp-content/uploads/2014/06/21042533/Carnegie-Mansion-nyc.jpg',
-      123.99,
-      new Date('2019-01-01'),
-      new Date('2019-12-31'),
-      'fake',
-    ),
-    new Place(
-      'p2',
-      'L\'Amour Toujours',
-      'A romantic place in Paris!',
-      'https://d1vp8nomjxwyf1.cloudfront.net/wp-content/uploads/sites/373/2018/03/26091241/Hotel-Amour-v%C3%A9randa-11.jpg',
-      183.99,
-      new Date('2019-01-01'),
-      new Date('2019-12-31'),
-      'fake',
-    ),
-    new Place(
-      'p3',
-      'The Foggy Palace',
-      'Not your average city trip!',
-      'https://i1.trekearth.com/photos/138102/dsc_0681.jpg',
-      76.45,
-      new Date('2019-01-01'),
-      new Date('2019-12-31'),
-      'fake',
-    ),
-  ]);
+  private _places = new BehaviorSubject<Place[]>([]);
 
   get places() {
     return this._places.asObservable();
   }
 
-  constructor(private authService: AuthService) { }
+  constructor(private authService: AuthService, private http: HttpClient) { }
 
-  getPlace(id: string) {
-    return this.places.pipe(take(1), map(places => {
-      return {...places.find(p => p.id === id)};
-    }));
+  fetchPlaces() {
+    return this.http
+      .get<{ [key: string]: PlaceData }>('https://place-booking-app.firebaseio.com/offered-places.json')
+      .pipe(
+        map(resData => {
+        const places = [];
+        for (const key in resData) {
+          if (resData.hasOwnProperty(key)) {
+            places.push(new Place(
+              key,
+              resData[key].title,
+              resData[key].description,
+              resData[key].imageUrl,
+              resData[key].price,
+              new Date(resData[key].availableFrom),
+              new Date(resData[key].availableTo),
+              resData[key].userId
+            ));
+          }
+        }
+        return places;
+          // return [];
+        }),
+        tap(places => {
+          this._places.next(places);
+        })
+        
+      );
   }
 
-  addPlace(title: string, description: string, price: number, fromDate: Date, toDate: Date,) {
+  getPlace(id: string) {
+    return this.http
+      .get<PlaceData>(`https://place-booking-app.firebaseio.com/offered-places/${id}.json`)
+      .pipe(
+        map(resData => {
+          return new Place(
+            id,
+            resData.title,
+            resData.description,
+            resData.imageUrl,
+            resData.price,
+            new Date(resData.availableFrom),
+            new Date(resData.availableTo),
+            resData.userId
+          );
+        })
+      );
+  }
+
+  addPlace(title: string, description: string, price: number, fromDate: Date, toDate: Date, ) {
+    
+    let generatedId: string;
     const newPlace = new Place(
       Math.random().toString(),
       title,
@@ -62,34 +87,78 @@ export class PlacesService {
       price,
       fromDate,
       toDate,
-      this.authService.userId);
+      this.authService.userId
+    );
 
-    return this.places.pipe(
+    return this.http.post<{name: string}>(
+      'https://place-booking-app.firebaseio.com/offered-places.json',
+      {
+        ...newPlace,
+        id: null
+      }
+    ).pipe(
+      switchMap(resData => {
+        generatedId = resData.name;
+        return this.places;
+      }),
       take(1),
-      delay(1500),
       tap(places => {
+        newPlace.id = generatedId;
         this._places.next(places.concat(newPlace));
       })
     );
+
+    // return this.places.pipe(
+    //   take(1),
+    //   delay(1500),
+    //   tap(places => {
+    //     this._places.next(places.concat(newPlace));
+    //   })
+    // );
   }
 
   updatePlace(placeId: string, title: string, description: string) {
-    return this.places.pipe(take(1), delay(1500), tap(places => {
-      const updatedPlaceIndex = places.findIndex(pl => pl.id === placeId);
-      const updatedPlaces = [...places];
-      const oldPlace = updatedPlaces[updatedPlaceIndex];
-      updatedPlaces[updatedPlaceIndex] = new Place(
-        oldPlace.id,
-        title,
-        description,
-        oldPlace.imageUrl,
-        oldPlace.price,
-        oldPlace.availableFrom,
-        oldPlace.availableTo,
-        oldPlace.userId
-      );
 
-      this._places.next(updatedPlaces);
-    }));
+    let updatedPlaces: Place[];
+    return this.places.pipe(
+      take(1),
+      switchMap(places => {
+
+        if (!places || places.length <= 0) {
+          return this.fetchPlaces();
+        } else {
+          return of(places);
+        }
+
+      }),
+      switchMap(places => {
+        
+        const updatedPlaceIndex = places.findIndex(pl => pl.id === placeId);
+        updatedPlaces = [...places];
+        const oldPlace = updatedPlaces[updatedPlaceIndex];
+        updatedPlaces[updatedPlaceIndex] = new Place(
+          oldPlace.id,
+          title,
+          description,
+          oldPlace.imageUrl,
+          oldPlace.price,
+          oldPlace.availableFrom,
+          oldPlace.availableTo,
+          oldPlace.userId
+        );
+
+        return this.http.put(
+          `https://place-booking-app.firebaseio.com/offered-places/${placeId}.json`,
+          {
+            ...updatedPlaces[updatedPlaceIndex], 
+            id: null
+          }
+        );
+      }),
+      tap(() => {
+        this._places.next(updatedPlaces);
+      })
+    );
+
   }
 }

@@ -1,7 +1,7 @@
 import { Component, OnInit, OnDestroy } from '@angular/core';
 import { ActivatedRoute, Router } from '@angular/router';
 import { Place } from '../../place.model';
-import { NavController, LoadingController } from '@ionic/angular';
+import { NavController, LoadingController, AlertController } from '@ionic/angular';
 import { PlacesService } from '../../places.service';
 import { FormGroup, FormControl, Validators } from '@angular/forms';
 import { Subscription } from 'rxjs';
@@ -13,7 +13,9 @@ import { Subscription } from 'rxjs';
 })
 export class EditOfferPage implements OnInit, OnDestroy {
   place: Place;
+  placeId: string;
   form: FormGroup;
+  isLoading = false;
   private placeSub: Subscription
 
   constructor(
@@ -22,6 +24,7 @@ export class EditOfferPage implements OnInit, OnDestroy {
     private placesService: PlacesService,
     private loadingCtrl: LoadingController,
     private router: Router,
+    private alertCtrl: AlertController
     ) { }
 
   ngOnInit() {
@@ -31,19 +34,37 @@ export class EditOfferPage implements OnInit, OnDestroy {
         return;
       }
 
-      this.placeSub = this.placesService.getPlace(paramMap.get('placeId')).subscribe(place => {
-        this.place = place;
-        this.form = new FormGroup({
-          title: new FormControl(this.place.title, {
-            updateOn: 'blur',
-            validators: [Validators.required]
-          }),
-          description: new FormControl(this.place.description, {
-            updateOn: 'blur',
-            validators: [Validators.required, Validators.maxLength(180)]
-          }),
+      this.placeId = paramMap.get('placeId');
+      this.isLoading = true;
+      this.placeSub = this.placesService
+        .getPlace(paramMap.get('placeId'))
+        .subscribe(place => {
+          this.place = place;
+          this.form = new FormGroup({
+            title: new FormControl(this.place.title, {
+              updateOn: 'blur',
+              validators: [Validators.required]
+            }),
+            description: new FormControl(this.place.description, {
+              updateOn: 'blur',
+              validators: [Validators.required, Validators.maxLength(180)]
+            }),
+          });
+          this.isLoading = false;
+        }, error => {
+            this.alertCtrl.create({
+              header: 'An error occured!',
+              message: 'Place could not be fetched. Please try again later with correct url!',
+              buttons: [{
+                text: 'Okay',
+                handler: () => {
+                  this.router.navigate(['/places/tabs/offers']);
+                }
+              }]
+            }).then(alertEl => {
+              alertEl.present();
+            });
         });
-      });
 
     });
   }
